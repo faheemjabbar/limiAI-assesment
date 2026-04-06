@@ -27,6 +27,9 @@ async function syncBatch(): Promise<void> {
 
   logger.info(`Syncing ${data.results.length} orders → MongoDB`);
 
+  type OrderStatus = "pending" | "processing" | "shipped" | "delivered" | "cancelled";
+  const validStatuses: OrderStatus[] = ["pending", "processing", "shipped", "delivered", "cancelled"];
+
   const bulkOps = data.results.map((order) => ({
     updateOne: {
       filter: { _id: order.external_id },
@@ -34,7 +37,9 @@ async function syncBatch(): Promise<void> {
         $set: {
           legacyPk: order.id,
           customerEmail: order.customer_email,
-          status: order.status,
+          status: validStatuses.includes(order.status as OrderStatus)
+            ? (order.status as OrderStatus)
+            : "pending" as OrderStatus,
           totalAmount: parseFloat(order.total_amount),
           syncedFromLegacy: true,
           updatedAt: new Date(order.updated_at),

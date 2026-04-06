@@ -1,6 +1,6 @@
-import mongoose, { Schema, Document } from "mongoose";
+import mongoose, { Schema } from "mongoose";
 
-export interface IOrder extends Document {
+export interface IOrder {
   _id: string;
   legacyPk: number;
   customerEmail: string;
