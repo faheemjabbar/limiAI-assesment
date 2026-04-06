@@ -1,0 +1,324 @@
+# infra/k8s/deployments.yaml
+#
+# Kubernetes manifests for the Hybrid Systems project.
+#
+# Apply with:
+#   kubectl apply -f infra/k8s/
+#
+# Prerequisites:
+#   - A running EKS cluster (see AWS_INFRASTRUCTURE.md for setup steps)
+#   - The hybrid-systems namespace: kubectl create namespace hybrid-systems
+#   - Secrets created via: kubectl apply -f infra/k8s/secrets.yaml (see template below)
+#   - ECR images pushed by the CI pipeline
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hybrid-systems
+
+---
+# ---------------------------------------------------------------------------
+# ConfigMap — shared non-secret environment variables
+# ---------------------------------------------------------------------------
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hybrid-config
+  namespace: hybrid-systems
+data:
+  DJANGO_URL: "http://django-service:8000"
+  MONGO_URI: "mongodb://mongo-service:27017/orders_db"
+  REDIS_URL: "redis://redis-service:6379/0"
+  SYNC_INTERVAL_MS: "10000"
+  SYNC_BATCH_SIZE: "50"
+  METRICS_INTERVAL_MS: "5000"
+  LOG_LEVEL: "info"
+
+---
+# ---------------------------------------------------------------------------
+# Django Deployment + Service
+# ---------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: django
+  namespace: hybrid-systems
+  labels:
+    app: django
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: django
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0          # zero-downtime rolling updates
+  template:
+    metadata:
+      labels:
+        app: django
+    spec:
+      containers:
+        - name: django
+          image: <ECR_REGISTRY>/hybrid-systems-django:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: hybrid-config
+          env:
+            - name: DJANGO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hybrid-secrets
+                  key: django-secret-key
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hybrid-secrets
+                  key: postgres-password
+          readinessProbe:
+            httpGet:
+              path: /health/
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health/
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: django-service
+  namespace: hybrid-systems
+spec:
+  selector:
+    app: django
+  ports:
+    - port: 8000
+      targetPort: 8000
+
+---
+# ---------------------------------------------------------------------------
+# Node.js Deployment + Service
+# ---------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: node
+  namespace: hybrid-systems
+  labels:
+    app: node
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: node
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: node
+    spec:
+      containers:
+        - name: node
+          image: <ECR_REGISTRY>/hybrid-systems-node:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 4000
+          envFrom:
+            - configMapRef:
+                name: hybrid-config
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 4000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 4000
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: node-service
+  namespace: hybrid-systems
+spec:
+  selector:
+    app: node
+  ports:
+    - port: 4000
+      targetPort: 4000
+
+---
+# ---------------------------------------------------------------------------
+# Dashboard Deployment + Service
+# ---------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dashboard
+  namespace: hybrid-systems
+  labels:
+    app: dashboard
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: dashboard
+  template:
+    metadata:
+      labels:
+        app: dashboard
+    spec:
+      containers:
+        - name: dashboard
+          image: <ECR_REGISTRY>/hybrid-systems-dashboard:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3000
+          env:
+            - name: NEXT_PUBLIC_NODE_SERVICE_URL
+              value: "https://api.yourdomain.com"   # replace with ALB URL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dashboard-service
+  namespace: hybrid-systems
+spec:
+  selector:
+    app: dashboard
+  ports:
+    - port: 3000
+      targetPort: 3000
+
+---
+# ---------------------------------------------------------------------------
+# Horizontal Pod Autoscalers
+# ---------------------------------------------------------------------------
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: node-hpa
+  namespace: hybrid-systems
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: node
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: django-hpa
+  namespace: hybrid-systems
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: django
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+
+---
+# ---------------------------------------------------------------------------
+# Ingress (AWS Load Balancer Controller)
+# ---------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hybrid-ingress
+  namespace: hybrid-systems
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    # Enable WebSocket support for Socket.io
+    alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=3600
+spec:
+  rules:
+    - host: yourdomain.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: dashboard-service
+                port:
+                  number: 3000
+    - host: api.yourdomain.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: node-service
+                port:
+                  number: 4000
+          - path: /django
+            pathType: Prefix
+            backend:
+              service:
+                name: django-service
+                port:
+                  number: 8000
