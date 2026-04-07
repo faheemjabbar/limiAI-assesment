@@ -64,10 +64,12 @@ def sync_status(request):
     synced = Order.objects.filter(synced_to_mongo=True).count()
     checkpoint = SyncCheckpoint.objects.filter(entity_type="order").first()
 
-    return Response({
-        "total_orders": total,
-        "synced_to_mongo": synced,
-        "pending_sync": total - synced,
-        "last_synced_pk": checkpoint.last_synced_pk if checkpoint else 0,
-        "last_synced_at": checkpoint.last_synced_at.isoformat() if checkpoint else None,
-    })
+    return Response(
+        {
+            "total_orders": total,
+            "synced_to_mongo": synced,
+            "pending_sync": total - synced,
+            "last_synced_pk": checkpoint.last_synced_pk if checkpoint else 0,
+            "last_synced_at": checkpoint.last_synced_at.isoformat() if checkpoint else None,
+        }
+    )
