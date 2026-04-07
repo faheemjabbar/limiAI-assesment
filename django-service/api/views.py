@@ -30,9 +30,7 @@ def unsynced_orders(request):
     checkpoint = SyncCheckpoint.objects.filter(entity_type="order").first()
     min_pk = checkpoint.last_synced_pk if checkpoint else 0
 
-    orders = list(
-        Order.objects.filter(synced_to_mongo=False, pk__gt=min_pk).order_by("pk")[:limit]
-    )
+    orders = list(Order.objects.filter(synced_to_mongo=False, pk__gt=min_pk).order_by("pk")[:limit])
     return Response({"count": len(orders), "results": OrderSerializer(orders, many=True).data})
 
 
