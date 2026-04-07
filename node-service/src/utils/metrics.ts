@@ -66,8 +66,8 @@ export async function collectMetrics(): Promise<ServiceMetrics> {
     checkRedis(),
   ]);
 
-  let orderStats = { total: 0, byStatus: {} as Record<string, number> };
-  let syncStats = { synced: 0, pending: 0 };
+  const orderStats = { total: 0, byStatus: {} as Record<string, number> };
+  const syncStats = { synced: 0, pending: 0 };
 
   try {
     const pipeline = await Order.aggregate([{ $group: { _id: "$status", count: { $sum: 1 } } }]);

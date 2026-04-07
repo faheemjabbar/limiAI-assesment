@@ -12,7 +12,9 @@ class Order(models.Model):
 
     external_id = models.UUIDField(unique=True, editable=False)
     customer_email = models.EmailField(db_index=True)
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending", db_index=True)
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default="pending", db_index=True
+    )
     total_amount = models.DecimalField(max_digits=10, decimal_places=2)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -36,4 +38,4 @@ class SyncCheckpoint(models.Model):
         db_table = "sync_checkpoints"
 
     def __str__(self):
-        return f"Checkpoint({self.entity_type}) → pk={self.last_synced_pk}"
+        return f"Checkpoint({self.entity_type}) last_pk={self.last_synced_pk}"
